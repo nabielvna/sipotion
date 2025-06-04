@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">My Application</string>
+    <string name="start_analysis">Start Analysis</string>
+    <string name="stop_analysis">Stop Analysis</string>
+    <string name="analyzing">Analyzing...</string>
+    <string name="analysis_stopped">Analysis Stopped. Press Start.</string>
+    <string name="no_posture_detected">No posture detected</string>
+    <string name="press_start_to_analyze">Press \'Start Analysis\'</string>
+</resources>
