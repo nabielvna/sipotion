@@ -12,6 +12,7 @@ import android.os.Bundle;
 import android.util.Base64;
 import android.util.Log;
 import android.util.Size;
+import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -48,7 +49,9 @@ import okhttp3.Response;
 public class MainActivity extends AppCompatActivity {
     private PreviewView previewView;
     private TextView resultTextView;
+    private TextView overlayTextView;
     private Button toggleAnalysisButton;
+    private Button restartButton;
 
     private ListenableFuture<ProcessCameraProvider> cameraProviderFuture;
     private ProcessCameraProvider cameraProvider;
@@ -61,25 +64,30 @@ public class MainActivity extends AppCompatActivity {
     private final String ROBOFLOW_API_URL = "https://detect.roboflow.com/sitting-posture-detection-3933f/1?api_key=sKe1oZrE1L1CzkUuJCaw"; // Your URL
 
     private boolean isAnalyzing = false;
+    private boolean isPostureDetected = false;
     private long lastAnalysisTimeMs = 0;
     private static final long ANALYSIS_INTERVAL_MS = 1000;
 
     private ActivityResultLauncher<String> requestCameraPermissionLauncher;
     private ImageAnalysis imageAnalysis;
 
-
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // Initialize views
         previewView = findViewById(R.id.previewView);
         resultTextView = findViewById(R.id.resultTextView);
+        overlayTextView = findViewById(R.id.overlayTextView);
         toggleAnalysisButton = findViewById(R.id.toggleAnalysisButton);
+        restartButton = findViewById(R.id.restartButton);
 
+        // Initialize executors
         cameraExecutor = Executors.newSingleThreadExecutor();
         roboflowExecutor = Executors.newSingleThreadExecutor();
 
+        // Camera permission launcher
         requestCameraPermissionLauncher =
                 registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
                     if (granted) {
@@ -90,6 +98,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
 
+        // Button listeners
         toggleAnalysisButton.setOnClickListener(v -> {
             if (isAnalyzing) {
                 stopAnalysis();
@@ -98,6 +107,11 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        restartButton.setOnClickListener(v -> {
+            restartAnalysis();
+        });
+
+        // Check camera permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera();
         } else {
@@ -111,8 +125,12 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         isAnalyzing = true;
+        isPostureDetected = false;
         toggleAnalysisButton.setText("Stop Analysis");
-        resultTextView.setText("Analysis Running...");
+        resultTextView.setText("Analyzing...");
+        overlayTextView.setText("Analyzing...");
+        overlayTextView.setVisibility(View.VISIBLE);
+        restartButton.setVisibility(View.GONE);
         bindImageAnalysisUseCase();
         Log.d(TAG, "Analysis started.");
     }
@@ -120,10 +138,46 @@ public class MainActivity extends AppCompatActivity {
     private void stopAnalysis() {
         isAnalyzing = false;
         toggleAnalysisButton.setText("Start Analysis");
-        resultTextView.setText("Analysis Stopped");
+        overlayTextView.setVisibility(View.GONE);
+        if (!isPostureDetected) {
+            resultTextView.setText("Analysis Stopped");
+        }
         Log.d(TAG, "Analysis stopped.");
     }
 
+    private void restartAnalysis() {
+        isPostureDetected = false;
+        restartButton.setVisibility(View.GONE);
+        resultTextView.setText("Ready to analyze");
+        startAnalysis();
+    }
+
+    private void onPostureDetected(String posture, float confidence) {
+        if (!isPostureDetected) {
+            isPostureDetected = true;
+            isAnalyzing = false;
+
+            runOnUiThread(() -> {
+                String resultText = "✓ Detected: " + posture +
+                        " (" + Math.round(confidence * 100) + "%)";
+                resultTextView.setText(resultText);
+                overlayTextView.setText("Detection Complete!");
+                overlayTextView.setVisibility(View.VISIBLE);
+                toggleAnalysisButton.setText("Start Analysis");
+                restartButton.setVisibility(View.VISIBLE);
+
+                // Show success notification
+                Toast.makeText(this, "Posture detected successfully!", Toast.LENGTH_SHORT).show();
+
+                // Hide overlay after 2 seconds
+                overlayTextView.postDelayed(() -> {
+                    overlayTextView.setVisibility(View.GONE);
+                }, 2000);
+            });
+
+            Log.d(TAG, "Posture detected and analysis stopped: " + posture);
+        }
+    }
 
     private void startCamera() {
         cameraProviderFuture = ProcessCameraProvider.getInstance(this);
@@ -159,7 +213,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-
     private void bindImageAnalysisUseCase() {
         if (cameraProvider == null) {
             Log.e(TAG, "Camera provider not available to bind image analysis.");
@@ -173,7 +226,7 @@ public class MainActivity extends AppCompatActivity {
                 .build();
 
         imageAnalysis.setAnalyzer(cameraExecutor, imageProxy -> {
-            if (!isAnalyzing) {
+            if (!isAnalyzing || isPostureDetected) {
                 imageProxy.close();
                 return;
             }
@@ -256,7 +309,6 @@ public class MainActivity extends AppCompatActivity {
         return nv21;
     }
 
-
     private Bitmap imageProxyToBitmap(ImageProxy imageProxy) {
         if (imageProxy.getFormat() != ImageFormat.YUV_420_888) {
             Log.e(TAG, "Unsupported image format: Expected YUV_420_888, got " + imageProxy.getFormat());
@@ -276,11 +328,10 @@ public class MainActivity extends AppCompatActivity {
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "Failed to create YuvImage or compress: " + e.getMessage(), e);
             return null;
-        }  catch (Exception e) {
+        } catch (Exception e) {
             Log.e(TAG, "Unexpected error during YuvImage processing: " + e.getMessage(), e);
             return null;
         }
-
 
         byte[] imageBytes = out.toByteArray();
         Bitmap bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
@@ -327,24 +378,27 @@ public class MainActivity extends AppCompatActivity {
 
                     if (roboflowResponse != null && roboflowResponse.predictions != null && !roboflowResponse.predictions.isEmpty()) {
                         Prediction first = roboflowResponse.predictions.get(0);
-                        String resultText = "Detected: " + first.className +
-                                " (" + Math.round(first.confidence * 100) + "%)";
-                        Log.d(TAG, "Detected posture: " + first.className + " with confidence " + first.confidence);
-                        runOnUiThread(() -> {
-                            resultTextView.setText(resultText);
-                        });
+
+                        // Stop analysis when posture is detected
+                        onPostureDetected(first.className, first.confidence);
+
                     } else {
                         Log.d(TAG, "No posture detected or empty predictions.");
                         runOnUiThread(() -> {
-                            if (isAnalyzing) resultTextView.setText("No posture detected");
+                            if (isAnalyzing && !isPostureDetected) {
+                                resultTextView.setText("Searching for posture...");
+                                overlayTextView.setText("Searching...");
+                            }
                         });
                     }
                 } else {
                     String errorBody = response.body() != null ? response.body().string() : "Unknown error";
                     Log.e(TAG, "Detection Failed: " + response.code() + " - " + errorBody);
                     runOnUiThread(() -> {
-                        if (isAnalyzing) resultTextView.setText("API Error: " + response.code());
-                        // Toast.makeText(MainActivity.this, "API Error: " + response.code(), Toast.LENGTH_SHORT).show();
+                        if (isAnalyzing && !isPostureDetected) {
+                            resultTextView.setText("API Error: " + response.code());
+                            overlayTextView.setText("Error occurred");
+                        }
                     });
                 }
                 if (response.body() != null) {
@@ -354,7 +408,10 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception e) {
                 Log.e(TAG, "Error sending image to Roboflow: " + e.getMessage(), e);
                 runOnUiThread(() -> {
-                    if (isAnalyzing) resultTextView.setText("Error: " + e.getMessage());
+                    if (isAnalyzing && !isPostureDetected) {
+                        resultTextView.setText("Error: " + e.getMessage());
+                        overlayTextView.setText("Connection error");
+                    }
                 });
             } finally {
                 if (bitmap != null && !bitmap.isRecycled()) {
