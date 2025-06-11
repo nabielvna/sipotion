@@ -1,5 +1,8 @@
 plugins {
-    alias(libs.plugins.android.application)
+    id("com.android.application")
+    kotlin("android")
+    kotlin("kapt")
+    id("com.google.dagger.hilt.android")
 }
 
 android {
@@ -12,7 +15,6 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -29,35 +31,48 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
+    kotlinOptions {
+        jvmTarget = "11"
+    }
+}
+
+kapt {
+    correctErrorTypes = true
 }
 
 dependencies {
+    val cameraxVersion = "1.3.4"
 
+    // -- Android UI & Core --
     implementation(libs.appcompat)
     implementation(libs.material)
     implementation(libs.activity)
     implementation(libs.constraintlayout)
+
+    // -- Networking --
     implementation(libs.okhttp)
     implementation(libs.gson)
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.ext.junit)
-    androidTestImplementation(libs.espresso.core)
 
-    val cameraxVersion = "1.3.0" // Gunakan versi stabil terbaru atau versi yang Anda inginkan
-
-    implementation("androidx.core:core-ktx:1.9.0") // Contoh versi, sesuaikan
-    implementation("androidx.appcompat:appcompat:1.6.1") // Contoh versi, sesuaikan
-    implementation("com.google.android.material:material:1.10.0") // Contoh versi, sesuaikan
-    implementation("androidx.constraintlayout:constraintlayout:2.1.4") // Contoh versi, sesuaikan
-
-    // Dependensi CameraX
+    // -- CameraX --
     implementation("androidx.camera:camera-core:${cameraxVersion}")
     implementation("androidx.camera:camera-camera2:${cameraxVersion}")
     implementation("androidx.camera:camera-lifecycle:${cameraxVersion}")
     implementation("androidx.camera:camera-view:${cameraxVersion}")
-    implementation("androidx.camera:camera-extensions:${cameraxVersion}") // Opsional untuk efek ekstensi
 
-    // Dependensi lain yang Anda gunakan (OkHttp, Gson)
-    implementation("com.squareup.okhttp3:okhttp:4.12.0") // Ganti dengan versi terbaru
-    implementation("com.google.code.gson:gson:2.10.1")
+    // -- Architecture Components --
+    implementation("androidx.lifecycle:lifecycle-viewmodel:2.8.1")
+    implementation("androidx.lifecycle:lifecycle-livedata:2.8.1")
+
+    // --
+    implementation("javax.inject:javax.inject:1")
+
+    // -- Dependency Injection - Hilt --
+    implementation("com.google.dagger:hilt-android:2.51.1")
+    kapt("com.google.dagger:hilt-compiler:2.51.1")
+
+    // -- Testing --
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.ext.junit)
+    androidTestImplementation(libs.espresso.core)
 }

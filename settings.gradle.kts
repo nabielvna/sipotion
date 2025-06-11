@@ -10,7 +10,15 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
+    plugins {
+        // Kotlin
+        kotlin("android") version "1.9.21"
+        kotlin("kapt")    version "1.9.21"
+        // Hilt
+        id("com.google.dagger.hilt.android") version "2.51.1"
+    }
 }
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
@@ -21,4 +29,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "My Application"
 include(":app")
- 
