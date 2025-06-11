@@ -123,12 +123,17 @@ public class MainActivity extends AppCompatActivity {
 
             switch (state.status) {
                 case READY:
+                    overlayView.clear();
+                    toggleAnalysisButton.setBackgroundColor(ContextCompat.getColor(this, R.color.colorBackgroundWhite));
                 case STOPPED:
+                    overlayView.clear();
+                    toggleAnalysisButton.setBackgroundColor(ContextCompat.getColor(this, R.color.colorBackgroundWhite));
                     // Anda bisa mengatur UI untuk status stop/ready di sini
                     unbindAnalysisUseCase();
                     break;
                 case ANALYZING:
                     // Anda bisa mengatur UI untuk status analyzing di sini
+                    toggleAnalysisButton.setBackgroundColor(ContextCompat.getColor(this, R.color.colorBackgroundRed));
                     bindAnalysisUseCase();
                     break;
                 case SUCCESS:

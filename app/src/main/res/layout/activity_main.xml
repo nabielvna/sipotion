@@ -2,6 +2,7 @@
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
+    android:background="@android:color/black"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     tools:context=".MainActivity">
@@ -15,7 +16,10 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintDimensionRatio="4:6"
+        app:layout_constraintVertical_bias="0.4">
+
 
         <androidx.camera.view.PreviewView
             android:id="@+id/previewView"
@@ -38,7 +42,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:gravity="center"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="36dp"
         android:padding="24dp"
         android:shadowColor="#80000000"
         android:shadowDx="1"
@@ -56,7 +60,7 @@
         android:id="@+id/flipCameraButton"
         android:layout_width="48dp"
         android:layout_height="48dp"
-        android:layout_marginTop="30dp"
+        android:layout_marginTop="53dp"
         android:layout_marginEnd="16dp"
         android:background="@drawable/bg_circle_transparent"
         android:contentDescription="Beralih Kamera"
@@ -73,7 +77,6 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:gravity="center_horizontal"
-        android:background="@color/colorSurfaceTransparent"
         android:paddingTop="16dp"
         android:paddingBottom="24dp"
         android:paddingStart="16dp"

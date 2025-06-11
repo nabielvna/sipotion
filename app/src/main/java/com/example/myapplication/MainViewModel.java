@@ -134,30 +134,36 @@ public class MainViewModel extends ViewModel {
                     String responseBody = response.body().string();
                     RoboflowResponse roboflowResponse = gson.fromJson(responseBody, RoboflowResponse.class);
 
-                    if (roboflowResponse != null && roboflowResponse.predictions != null && !roboflowResponse.predictions.isEmpty()) {
-                        Prediction first = roboflowResponse.predictions.get(0);
+                    // --- PERBAIKAN UTAMA: Tambahkan pengecekan terakhir di sini ---
+                    // Sebelum menampilkan hasil, pastikan kita masih dalam mode analisis.
+                    if (isAnalyzing.get()) {
+                        if (roboflowResponse != null && roboflowResponse.predictions != null && !roboflowResponse.predictions.isEmpty()) {
+                            Prediction first = roboflowResponse.predictions.get(0);
 
-                        // --- PERUBAHAN: Kirim seluruh objek 'first' ke UiState ---
-                        _uiState.postValue(UiState.success(first));
-                        Log.d(TAG, "Posture updated: " + first.className + " with confidence " + first.confidence);
+                            _uiState.postValue(UiState.success(first));
+                            Log.d(TAG, "Posture updated: " + first.className + " with confidence " + first.confidence);
 
-                        final Bitmap bitmapToSave = bitmap;
-                        imageSaverExecutor.submit(() -> {
-                            imageSaver.saveBitmap(bitmapToSave, System.currentTimeMillis(), first.className, first.confidence);
-                        });
-                        bitmapPassedToSaver = true;
+                            final Bitmap bitmapToSave = bitmap;
+                            imageSaverExecutor.submit(() -> {
+                                imageSaver.saveBitmap(bitmapToSave, System.currentTimeMillis(), first.className, first.confidence);
+                            });
+                            bitmapPassedToSaver = true;
 
+                        } else {
+                            _uiState.postValue(UiState.noDetection());
+                        }
                     } else {
-                        _uiState.postValue(UiState.noDetection());
+                        Log.d(TAG, "Analysis stopped. Ignoring result from in-flight request.");
                     }
                 }
 
             } catch (IOException e) {
                 Log.e(TAG, "Network or Server Error: ", e);
-                _uiState.postValue(UiState.error("Network Error"));
+                // Hanya update UI jika masih menganalisis
+                if(isAnalyzing.get()) _uiState.postValue(UiState.error("Network Error"));
             } catch (Exception e) {
                 Log.e(TAG, "An unexpected error occurred: ", e);
-                _uiState.postValue(UiState.error(e.getMessage()));
+                if(isAnalyzing.get()) _uiState.postValue(UiState.error(e.getMessage()));
             } finally {
                 if (!bitmapPassedToSaver && bitmap != null && !bitmap.isRecycled()) {
                     bitmap.recycle();
@@ -178,7 +184,6 @@ public class MainViewModel extends ViewModel {
         public List<Prediction> predictions;
     }
 
-    // --- PERUBAHAN: Tambahkan field untuk koordinat bounding box ---
     public static class Prediction {
         public float x;
         public float y;
