@@ -7,12 +7,16 @@ import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.YuvImage;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.Size;
 import android.widget.Button;
+import android.widget.ImageButton;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -41,20 +45,23 @@ import dagger.hilt.android.AndroidEntryPoint;
 @AndroidEntryPoint
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "SITTING_POSTURE_ACT";
-    private static final long ANALYSIS_INTERVAL_MS = 1000;
+    private static final long ANALYSIS_INTERVAL_MS = 500;
 
-    // View Components
     private PreviewView previewView;
     private TextView resultTextView;
     private Button toggleAnalysisButton;
+    private ImageButton flipCameraButton;
+    private OverlayView overlayView;
 
-    // ViewModel and CameraX
     private MainViewModel viewModel;
     private ProcessCameraProvider cameraProvider;
     private Preview preview;
     private ImageAnalysis imageAnalysis;
     private CameraSelector cameraSelector;
     private long lastAnalysisTimeMs = 0;
+    private int currentLensFacing = CameraSelector.LENS_FACING_BACK;
+    private int imageWidth;
+    private int imageHeight;
 
     @Inject
     @Named("cameraExecutor")
@@ -63,11 +70,20 @@ public class MainActivity extends AppCompatActivity {
     private final ActivityResultLauncher<String> requestCameraPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
                 if (granted) {
-                    setupCamera();
+                    checkStoragePermission();
                 } else {
                     resultTextView.setText("Camera permission is required to use this application.");
                 }
             });
+
+    private final ActivityResultLauncher<String> requestStoragePermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
+                if (!granted) {
+                    resultTextView.setText("Storage permission denied. Images will not be saved on older Android versions.");
+                }
+                setupCamera();
+            });
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -85,40 +101,101 @@ public class MainActivity extends AppCompatActivity {
         previewView = findViewById(R.id.previewView);
         resultTextView = findViewById(R.id.resultTextView);
         toggleAnalysisButton = findViewById(R.id.toggleAnalysisButton);
+        flipCameraButton = findViewById(R.id.flipCameraButton);
+        overlayView = findViewById(R.id.overlayView);
 
-        // --- MODIFICATION START ---
-        // Simplified the button's logic to just a toggle.
         toggleAnalysisButton.setOnClickListener(v -> viewModel.toggleAnalysis());
-        // --- MODIFICATION END ---
+
+        flipCameraButton.setOnClickListener(v -> {
+            if (currentLensFacing == CameraSelector.LENS_FACING_BACK) {
+                currentLensFacing = CameraSelector.LENS_FACING_FRONT;
+            } else {
+                currentLensFacing = CameraSelector.LENS_FACING_BACK;
+            }
+            setupCamera();
+        });
     }
 
     private void setupObservers() {
         viewModel.uiState.observe(this, state -> {
             resultTextView.setText(state.message);
+            overlayView.clear();
 
-            // Logic to control the button's text, color, and camera analysis binding
             switch (state.status) {
                 case READY:
                 case STOPPED:
-                    toggleAnalysisButton.setBackgroundColor(ContextCompat.getColor(this, R.color.colorBackgroundWhite)); // Assuming a start color
+                    // Anda bisa mengatur UI untuk status stop/ready di sini
                     unbindAnalysisUseCase();
                     break;
-
                 case ANALYZING:
+                    // Anda bisa mengatur UI untuk status analyzing di sini
+                    bindAnalysisUseCase();
+                    break;
                 case SUCCESS:
+                    bindAnalysisUseCase();
+                    if (state.prediction != null) {
+                        drawBoundingBox(state.prediction);
+                    }
+                    break;
                 case ERROR:
-                    toggleAnalysisButton.setBackgroundColor(ContextCompat.getColor(this, R.color.colorBackgroundRed)); // Running color
-                    bindAnalysisUseCase(); // Bind (or ensure it's bound) for analysis
+                    bindAnalysisUseCase();
                     break;
             }
         });
     }
 
+    private void drawBoundingBox(MainViewModel.Prediction prediction) {
+        float halfWidth = prediction.width / 2;
+        float halfHeight = prediction.height / 2;
+        float left = prediction.x - halfWidth;
+        float top = prediction.y - halfHeight;
+        float right = prediction.x + halfWidth;
+        float bottom = prediction.y + halfHeight;
+
+        float viewWidth = overlayView.getWidth();
+        float viewHeight = overlayView.getHeight();
+
+        if (imageWidth == 0 || imageHeight == 0) return;
+
+        float scaleX = viewWidth / (float) imageWidth;
+        float scaleY = viewHeight / (float) imageHeight;
+
+        float scale = Math.min(scaleX, scaleY);
+
+        float offsetX = (viewWidth - (imageWidth * scale)) / 2;
+        float offsetY = (viewHeight - (imageHeight * scale)) / 2;
+
+        // --- PERBAIKAN: Menghilangkan tanda hubung yang salah dari nama variabel ---
+        RectF scaledBox = new RectF(
+                (left * scale) + offsetX,
+                (top * scale) + offsetY,
+                (right * scale) + offsetX,
+                (bottom * scale) + offsetY
+        );
+
+        OverlayView.Box box = new OverlayView.Box(scaledBox, prediction.className);
+        overlayView.add(box);
+        overlayView.invalidate();
+    }
+
+
     private void checkCameraPermission() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            setupCamera();
+            checkStoragePermission();
         } else {
             requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA);
+        }
+    }
+
+    private void checkStoragePermission() {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+                setupCamera();
+            } else {
+                requestStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+            }
+        } else {
+            setupCamera();
         }
     }
 
@@ -127,11 +204,27 @@ public class MainActivity extends AppCompatActivity {
         cameraProviderFuture.addListener(() -> {
             try {
                 cameraProvider = cameraProviderFuture.get();
-                preview = new Preview.Builder().build();
                 cameraSelector = new CameraSelector.Builder()
-                        .requireLensFacing(CameraSelector.LENS_FACING_BACK)
+                        .requireLensFacing(currentLensFacing)
                         .build();
+
+                if (!cameraProvider.hasCamera(cameraSelector)) {
+                    Toast.makeText(this, "Kamera tidak tersedia", Toast.LENGTH_SHORT).show();
+                    currentLensFacing = (currentLensFacing == CameraSelector.LENS_FACING_BACK) ? CameraSelector.LENS_FACING_FRONT : CameraSelector.LENS_FACING_BACK;
+                    cameraSelector = new CameraSelector.Builder().requireLensFacing(currentLensFacing).build();
+                    if (!cameraProvider.hasCamera(cameraSelector)) {
+                        Toast.makeText(this, "Tidak ada kamera yang bisa digunakan", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                }
+
+                preview = new Preview.Builder().build();
+
                 bindPreviewOnly();
+                if (viewModel.isCurrentlyAnalyzing()) {
+                    bindAnalysisUseCase();
+                }
+
             } catch (Exception e) {
                 Log.e(TAG, "Failed to start camera: " + e.getMessage(), e);
             }
@@ -147,7 +240,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void bindAnalysisUseCase() {
-        if (cameraProvider == null || imageAnalysis != null) return; // Avoid re-binding
+        if (cameraProvider == null || imageAnalysis != null) {
+            if (imageAnalysis != null) cameraProvider.unbind(imageAnalysis);
+            imageAnalysis = null;
+        }
 
         imageAnalysis = new ImageAnalysis.Builder()
                 .setTargetResolution(new Size(640, 480))
@@ -156,7 +252,6 @@ public class MainActivity extends AppCompatActivity {
         imageAnalysis.setAnalyzer(cameraExecutor, this::processImageProxy);
 
         try {
-            // Unbind everything first to add the analysis use case cleanly
             cameraProvider.unbindAll();
             preview.setSurfaceProvider(previewView.getSurfaceProvider());
             cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis);
@@ -169,7 +264,6 @@ public class MainActivity extends AppCompatActivity {
         if (cameraProvider != null && imageAnalysis != null) {
             cameraProvider.unbind(imageAnalysis);
             imageAnalysis = null;
-            // Re-bind preview only to keep the camera view active
             bindPreviewOnly();
         }
     }
@@ -197,6 +291,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private Bitmap imageProxyToBitmap(ImageProxy image) {
+        if (image.getImageInfo().getRotationDegrees() == 90 || image.getImageInfo().getRotationDegrees() == 270) {
+            imageWidth = image.getHeight();
+            imageHeight = image.getWidth();
+        } else {
+            imageWidth = image.getWidth();
+            imageHeight = image.getHeight();
+        }
+
         if (image.getFormat() != ImageFormat.YUV_420_888) return null;
         ByteBuffer yBuffer = image.getPlanes()[0].getBuffer();
         ByteBuffer uBuffer = image.getPlanes()[1].getBuffer();
@@ -213,8 +315,14 @@ public class MainActivity extends AppCompatActivity {
         yuvImage.compressToJpeg(new Rect(0, 0, image.getWidth(), image.getHeight()), 90, out);
         byte[] imageBytes = out.toByteArray();
         Bitmap bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
+
         Matrix matrix = new Matrix();
         matrix.postRotate(image.getImageInfo().getRotationDegrees());
+
+        if (currentLensFacing == CameraSelector.LENS_FACING_FRONT) {
+            matrix.postScale(-1, 1, bitmap.getWidth() / 2f, bitmap.getHeight() / 2f);
+        }
+
         Bitmap rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
         if (rotatedBitmap != bitmap) {
             bitmap.recycle();

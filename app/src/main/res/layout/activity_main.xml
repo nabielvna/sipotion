@@ -6,20 +6,39 @@
     android:layout_height="match_parent"
     tools:context=".MainActivity">
 
-    <androidx.camera.view.PreviewView
-        android:id="@+id/previewView"
+    <!-- FrameLayout ini berfungsi sebagai kontainer untuk menumpuk
+         PreviewView dan OverlayView di atas satu sama lain. -->
+    <FrameLayout
+        android:id="@+id/camera_container"
         android:layout_width="0dp"
         android:layout_height="0dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="parent">
 
+        <androidx.camera.view.PreviewView
+            android:id="@+id/previewView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- OverlayView untuk menggambar bounding box.
+             Pastikan ID-nya cocok dengan yang di MainActivity. -->
+        <com.example.myapplication.OverlayView
+            android:id="@+id/overlayView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </FrameLayout>
+
+    <!-- Semua UI lainnya diletakkan di luar FrameLayout
+         agar muncul di lapisan paling atas. -->
     <TextView
         android:id="@+id/headerTextView"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:gravity="center"
+        android:layout_marginTop="16dp"
         android:padding="24dp"
         android:shadowColor="#80000000"
         android:shadowDx="1"
@@ -33,10 +52,21 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!--
-      Container untuk Hasil dan Tombol di Bagian Bawah
-      Sekarang menggunakan latar belakang hitam transparan.
-    -->
+    <ImageButton
+        android:id="@+id/flipCameraButton"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginTop="30dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_circle_transparent"
+        android:contentDescription="Beralih Kamera"
+        android:padding="8dp"
+        android:scaleType="fitCenter"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:srcCompat="@drawable/ic_camera_flip"
+        app:tint="@android:color/white" />
+
     <LinearLayout
         android:id="@+id/bottomActionContainer"
         android:layout_width="0dp"
@@ -52,16 +82,11 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
-        <!--
-          Minimalist Result Display
-          Diperbarui untuk menggunakan warna permukaan agar menonjol di latar belakang gelap.
-        -->
         <androidx.cardview.widget.CardView
             android:id="@+id/resultCard"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
-            app:cardBackgroundColor="@color/colorSurface"
             app:cardCornerRadius="12dp"
             app:cardElevation="4dp">
 
@@ -79,14 +104,8 @@
                 android:paddingTop="12dp"
                 android:paddingBottom="12dp"
                 tools:text="✓ Detected: Good Posture" />
-
         </androidx.cardview.widget.CardView>
 
-        <!--
-          Tombol Aksi Berbentuk Lingkaran (Putih)
-          Tombol ini sekarang berbentuk lingkaran dan berwarna putih.
-          Warna ikon telah diubah agar kontras.
-        -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/toggleAnalysisButton"
             style="@style/Widget.MaterialComponents.Button.Icon"
@@ -100,7 +119,6 @@
             app:cornerRadius="32dp"
             app:iconPadding="0dp"
             app:iconTint="@color/colorPrimary" />
-
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

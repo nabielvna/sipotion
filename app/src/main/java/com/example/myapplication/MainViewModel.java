@@ -13,6 +13,7 @@ import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,25 +31,37 @@ import okhttp3.Response;
 @HiltViewModel
 public class MainViewModel extends ViewModel {
     private static final String TAG = "SITTING_POSTURE_VM";
-    private static final String ROBOFLOW_API_URL = "https://detect.roboflow.com/sitting-posture-detection-3933f/1?api_key=sKe1oZrE1L1CzkUuJCaw";
 
-    // Dependencies injected by Hilt
+    private static final String ROBOFLOW_BASE_URL = "https://detect.roboflow.com/sitting-posture-detection-3933f/1";
+    private static final String ROBOFLOW_API_KEY = "sKe1oZrE1L1CzkUuJCaw";
+    private static final int BITMAP_COMPRESSION_QUALITY = 90;
+
     private final OkHttpClient client;
     private final Gson gson;
     private final ExecutorService roboflowExecutor;
+    private final ImageSaver imageSaver;
+    private final ExecutorService imageSaverExecutor;
 
-    // LiveData to communicate with the UI (Activity)
     private final MutableLiveData<UiState> _uiState = new MutableLiveData<>(UiState.ready());
     public final LiveData<UiState> uiState = _uiState;
 
-    // Internal state to manage the analysis flow
     private final AtomicBoolean isAnalyzing = new AtomicBoolean(false);
+    private final AtomicBoolean isProcessingFrame = new AtomicBoolean(false);
+
 
     @Inject
-    public MainViewModel(OkHttpClient client, Gson gson, @Named("roboflowExecutor") ExecutorService roboflowExecutor) {
+    public MainViewModel(
+            OkHttpClient client,
+            Gson gson,
+            @Named("roboflowExecutor") ExecutorService roboflowExecutor,
+            @Named("imageSaverExecutor") ExecutorService imageSaverExecutor,
+            ImageSaver imageSaver
+    ) {
         this.client = client;
         this.gson = gson;
         this.roboflowExecutor = roboflowExecutor;
+        this.imageSaver = imageSaver;
+        this.imageSaverExecutor = imageSaverExecutor;
     }
 
     public void toggleAnalysis() {
@@ -68,6 +81,7 @@ public class MainViewModel extends ViewModel {
 
     public void stopAnalysis() {
         if (isAnalyzing.compareAndSet(true, false)) {
+            isProcessingFrame.set(false);
             _uiState.postValue(UiState.stopped());
             Log.d(TAG, "Analysis stopped by user.");
         }
@@ -83,49 +97,72 @@ public class MainViewModel extends ViewModel {
             return;
         }
 
+        if (!isProcessingFrame.compareAndSet(false, true)) {
+            Log.v(TAG, "Skipping frame, previous frame still processing.");
+            if (bitmap != null && !bitmap.isRecycled()) {
+                bitmap.recycle();
+            }
+            return;
+        }
+
         roboflowExecutor.submit(() -> {
+            if (!isAnalyzing.get()) {
+                Log.d(TAG, "Aborting frame processing because analysis has been stopped.");
+                if (bitmap != null && !bitmap.isRecycled()) {
+                    bitmap.recycle();
+                }
+                isProcessingFrame.set(false);
+                return;
+            }
+
+            boolean bitmapPassedToSaver = false;
             try {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, baos);
+                bitmap.compress(Bitmap.CompressFormat.JPEG, BITMAP_COMPRESSION_QUALITY, baos);
                 byte[] byteArray = baos.toByteArray();
                 String base64Image = Base64.encodeToString(byteArray, Base64.NO_WRAP);
 
+                String url = ROBOFLOW_BASE_URL + "?api_key=" + ROBOFLOW_API_KEY;
                 RequestBody requestBody = RequestBody.create(base64Image, MediaType.parse("application/x-www-form-urlencoded"));
-                Request request = new Request.Builder().url(ROBOFLOW_API_URL).post(requestBody).build();
+                Request request = new Request.Builder().url(url).post(requestBody).build();
 
                 try (Response response = client.newCall(request).execute()) {
                     if (!response.isSuccessful() || response.body() == null) {
-                        throw new Exception("Detection Failed: " + response.code());
+                        throw new IOException("Detection Failed: " + response.code() + " " + response.message());
                     }
 
                     String responseBody = response.body().string();
                     RoboflowResponse roboflowResponse = gson.fromJson(responseBody, RoboflowResponse.class);
 
-                    // --- MODIFICATION START ---
-                    // Don't stop analysis on success. Just post the latest result.
                     if (roboflowResponse != null && roboflowResponse.predictions != null && !roboflowResponse.predictions.isEmpty()) {
                         Prediction first = roboflowResponse.predictions.get(0);
-                        _uiState.postValue(UiState.success(first.className, first.confidence));
-                        Log.d(TAG, "Posture updated: " + first.className);
+
+                        // --- PERUBAHAN: Kirim seluruh objek 'first' ke UiState ---
+                        _uiState.postValue(UiState.success(first));
+                        Log.d(TAG, "Posture updated: " + first.className + " with confidence " + first.confidence);
+
+                        final Bitmap bitmapToSave = bitmap;
+                        imageSaverExecutor.submit(() -> {
+                            imageSaver.saveBitmap(bitmapToSave, System.currentTimeMillis(), first.className, first.confidence);
+                        });
+                        bitmapPassedToSaver = true;
+
                     } else {
-                        // If no object is detected, we can post the "Analyzing..." status again
-                        // to let the user know it's still working.
-                        _uiState.postValue(UiState.analyzing());
+                        _uiState.postValue(UiState.noDetection());
                     }
-                    // --- MODIFICATION END ---
                 }
 
+            } catch (IOException e) {
+                Log.e(TAG, "Network or Server Error: ", e);
+                _uiState.postValue(UiState.error("Network Error"));
             } catch (Exception e) {
-                // --- MODIFICATION START ---
-                // Don't stop analysis on error. Just post the error message.
-                // The analysis will continue with the next frame.
-                Log.e(TAG, "Error sending image: ", e);
+                Log.e(TAG, "An unexpected error occurred: ", e);
                 _uiState.postValue(UiState.error(e.getMessage()));
-                // --- MODIFICATION END ---
             } finally {
-                if (bitmap != null && !bitmap.isRecycled()) {
+                if (!bitmapPassedToSaver && bitmap != null && !bitmap.isRecycled()) {
                     bitmap.recycle();
                 }
+                isProcessingFrame.set(false);
             }
         });
     }
@@ -134,9 +171,21 @@ public class MainViewModel extends ViewModel {
     protected void onCleared() {
         super.onCleared();
         roboflowExecutor.shutdown();
+        imageSaverExecutor.shutdown();
     }
 
-    // --- Data Classes for JSON Response ---
-    public static class RoboflowResponse { public List<Prediction> predictions; }
-    public static class Prediction { public float confidence; @SerializedName("class") public String className; }
+    public static class RoboflowResponse {
+        public List<Prediction> predictions;
+    }
+
+    // --- PERUBAHAN: Tambahkan field untuk koordinat bounding box ---
+    public static class Prediction {
+        public float x;
+        public float y;
+        public float width;
+        public float height;
+        public float confidence;
+        @SerializedName("class")
+        public String className;
+    }
 }
