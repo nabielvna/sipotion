@@ -9,7 +9,6 @@ import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.YuvImage;
-import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.Size;
@@ -35,6 +34,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 
 import javax.inject.Inject;
@@ -70,20 +70,11 @@ public class MainActivity extends AppCompatActivity {
     private final ActivityResultLauncher<String> requestCameraPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
                 if (granted) {
-                    checkStoragePermission();
+                    setupCamera();
                 } else {
                     resultTextView.setText("Camera permission is required to use this application.");
                 }
             });
-
-    private final ActivityResultLauncher<String> requestStoragePermissionLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
-                if (!granted) {
-                    resultTextView.setText("Storage permission denied. Images will not be saved on older Android versions.");
-                }
-                setupCamera();
-            });
-
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -112,38 +103,52 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 currentLensFacing = CameraSelector.LENS_FACING_BACK;
             }
+            // setupCamera akan otomatis re-bind dengan kamera yang benar
             setupCamera();
         });
     }
 
+    // --- METODE INI TELAH DIPERBAIKI ---
     private void setupObservers() {
         viewModel.uiState.observe(this, state -> {
             resultTextView.setText(state.message);
             overlayView.clear();
 
+            // Logika untuk menggambar prediksi (tetap sama)
+            List<MainViewModel.Prediction> predictionsToDraw = state.predictions;
+
+            if (predictionsToDraw != null && !predictionsToDraw.isEmpty()) {
+                for (MainViewModel.Prediction prediction : predictionsToDraw) {
+                    drawBoundingBox(prediction);
+                }
+                overlayView.invalidate();
+            }
+
+            // --- LOGIKA BARU UNTUK MENGATUR KAMERA DAN UI ---
+            // Logika ini hanya menjalankan bind/unbind saat transisi state utama
             switch (state.status) {
                 case READY:
-                    overlayView.clear();
-                    toggleAnalysisButton.setBackgroundColor(ContextCompat.getColor(this, R.color.colorBackgroundWhite));
                 case STOPPED:
-                    overlayView.clear();
                     toggleAnalysisButton.setBackgroundColor(ContextCompat.getColor(this, R.color.colorBackgroundWhite));
-                    // Anda bisa mengatur UI untuk status stop/ready di sini
-                    unbindAnalysisUseCase();
-                    break;
-                case ANALYZING:
-                    // Anda bisa mengatur UI untuk status analyzing di sini
-                    toggleAnalysisButton.setBackgroundColor(ContextCompat.getColor(this, R.color.colorBackgroundRed));
-                    bindAnalysisUseCase();
-                    break;
-                case SUCCESS:
-                    bindAnalysisUseCase();
-                    if (state.prediction != null) {
-                        drawBoundingBox(state.prediction);
+                    // Matikan use case analisis jika belum mati
+                    if (imageAnalysis != null) {
+                        unbindAnalysisUseCase();
                     }
                     break;
+
+                case ANALYZING:
+                    toggleAnalysisButton.setBackgroundColor(ContextCompat.getColor(this, R.color.colorBackgroundRed));
+                    // Nyalakan use case analisis HANYA jika belum aktif
+                    if (imageAnalysis == null) {
+                        bindAnalysisUseCase();
+                    }
+                    break;
+
+                case SUCCESS:
                 case ERROR:
-                    bindAnalysisUseCase();
+                    // JANGAN panggil bind/unbind di sini. Biarkan kamera tetap berjalan.
+                    // Cukup pastikan warna tombol benar.
+                    toggleAnalysisButton.setBackgroundColor(ContextCompat.getColor(this, R.color.colorBackgroundRed));
                     break;
             }
         });
@@ -170,7 +175,6 @@ public class MainActivity extends AppCompatActivity {
         float offsetX = (viewWidth - (imageWidth * scale)) / 2;
         float offsetY = (viewHeight - (imageHeight * scale)) / 2;
 
-        // --- PERBAIKAN: Menghilangkan tanda hubung yang salah dari nama variabel ---
         RectF scaledBox = new RectF(
                 (left * scale) + offsetX,
                 (top * scale) + offsetY,
@@ -178,29 +182,18 @@ public class MainActivity extends AppCompatActivity {
                 (bottom * scale) + offsetY
         );
 
-        OverlayView.Box box = new OverlayView.Box(scaledBox, prediction.className);
+        String label = prediction.className + " (" + Math.round(prediction.confidence * 100) + "%)";
+        OverlayView.Box box = new OverlayView.Box(scaledBox, label);
+
         overlayView.add(box);
-        overlayView.invalidate();
     }
 
 
     private void checkCameraPermission() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            checkStoragePermission();
+            setupCamera();
         } else {
             requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA);
-        }
-    }
-
-    private void checkStoragePermission() {
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
-                setupCamera();
-            } else {
-                requestStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
-            }
-        } else {
-            setupCamera();
         }
     }
 
@@ -226,6 +219,7 @@ public class MainActivity extends AppCompatActivity {
                 preview = new Preview.Builder().build();
 
                 bindPreviewOnly();
+                // Jika user sudah dalam mode analisis, langsung bind analysis juga
                 if (viewModel.isCurrentlyAnalyzing()) {
                     bindAnalysisUseCase();
                 }
@@ -245,9 +239,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void bindAnalysisUseCase() {
-        if (cameraProvider == null || imageAnalysis != null) {
-            if (imageAnalysis != null) cameraProvider.unbind(imageAnalysis);
-            imageAnalysis = null;
+        if (cameraProvider == null) {
+            return;
+        }
+        // Pastikan tidak ada binding ganda
+        if (imageAnalysis != null) {
+            cameraProvider.unbind(imageAnalysis);
         }
 
         imageAnalysis = new ImageAnalysis.Builder()
@@ -257,11 +254,17 @@ public class MainActivity extends AppCompatActivity {
         imageAnalysis.setAnalyzer(cameraExecutor, this::processImageProxy);
 
         try {
-            cameraProvider.unbindAll();
-            preview.setSurfaceProvider(previewView.getSurfaceProvider());
+            // Jangan unbindAll di sini, cukup unbind preview jika perlu dan re-bind semua
+            cameraProvider.unbind(preview);
             cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis);
         } catch (Exception e) {
             Log.e(TAG, "Failed to bind analysis use case", e);
+            // Jika gagal, coba re-bind preview saja
+            try {
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview);
+            } catch (Exception e2) {
+                Log.e(TAG, "Failed to re-bind preview after analysis failure", e2);
+            }
         }
     }
 
@@ -269,7 +272,8 @@ public class MainActivity extends AppCompatActivity {
         if (cameraProvider != null && imageAnalysis != null) {
             cameraProvider.unbind(imageAnalysis);
             imageAnalysis = null;
-            bindPreviewOnly();
+            // Kita tidak perlu memanggil bindPreviewOnly() karena preview masih terikat.
+            // Jika Anda ingin kamera berhenti total, maka panggil unbindAll()
         }
     }
 

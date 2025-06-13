@@ -44,14 +44,6 @@ public class AppModule {
     @Singleton
     @Named("roboflowExecutor")
     public ExecutorService provideRoboflowExecutor() {
-        return Executors.newSingleThreadExecutor();
-    }
-
-    // --- PENAMBAHAN: Executor khusus untuk menyimpan gambar ---
-    @Provides
-    @Singleton
-    @Named("imageSaverExecutor")
-    public ExecutorService provideImageSaverExecutor() {
-        return Executors.newSingleThreadExecutor();
+        return Executors.newCachedThreadPool();
     }
 }

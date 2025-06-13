@@ -32,15 +32,16 @@ import okhttp3.Response;
 public class MainViewModel extends ViewModel {
     private static final String TAG = "SITTING_POSTURE_VM";
 
-    private static final String ROBOFLOW_BASE_URL = "https://detect.roboflow.com/sitting-posture-detection-3933f/1";
-    private static final String ROBOFLOW_API_KEY = "sKe1oZrE1L1CzkUuJCaw";
-    private static final int BITMAP_COMPRESSION_QUALITY = 90;
+    private static final String ROBOFLOW_BASE_URL = "https://detect.roboflow.com/sipotion/4";
+    private static final String ROBOFLOW_API_KEY = "yB9gVkx9hdfjO8eNlabm";
+    private static final int ROBOFLOW_CONFIDENCE_THRESHOLD = 80;
+
+    // Menurunkan kualitas untuk mengurangi ukuran data & mempercepat proses
+    private static final int BITMAP_COMPRESSION_QUALITY = 50;
 
     private final OkHttpClient client;
     private final Gson gson;
     private final ExecutorService roboflowExecutor;
-    private final ImageSaver imageSaver;
-    private final ExecutorService imageSaverExecutor;
 
     private final MutableLiveData<UiState> _uiState = new MutableLiveData<>(UiState.ready());
     public final LiveData<UiState> uiState = _uiState;
@@ -48,20 +49,18 @@ public class MainViewModel extends ViewModel {
     private final AtomicBoolean isAnalyzing = new AtomicBoolean(false);
     private final AtomicBoolean isProcessingFrame = new AtomicBoolean(false);
 
+    // Membuat buffer untuk digunakan kembali demi mengurangi memory churn (GC pauses)
+    private final ByteArrayOutputStream reusableBaos = new ByteArrayOutputStream();
 
     @Inject
     public MainViewModel(
             OkHttpClient client,
             Gson gson,
-            @Named("roboflowExecutor") ExecutorService roboflowExecutor,
-            @Named("imageSaverExecutor") ExecutorService imageSaverExecutor,
-            ImageSaver imageSaver
+            @Named("roboflowExecutor") ExecutorService roboflowExecutor
     ) {
         this.client = client;
         this.gson = gson;
         this.roboflowExecutor = roboflowExecutor;
-        this.imageSaver = imageSaver;
-        this.imageSaverExecutor = imageSaverExecutor;
     }
 
     public void toggleAnalysis() {
@@ -74,7 +73,9 @@ public class MainViewModel extends ViewModel {
 
     public void startAnalysis() {
         if (isAnalyzing.compareAndSet(false, true)) {
-            _uiState.postValue(UiState.analyzing());
+            // Ambil data terakhir untuk menjaga kontinuitas UI saat analisis dimulai
+            List<Prediction> lastSuccess = _uiState.getValue() != null ? _uiState.getValue().lastSuccessfulPredictions : null;
+            _uiState.postValue(UiState.analyzing(lastSuccess));
             Log.d(TAG, "Analysis started by user.");
         }
     }
@@ -92,37 +93,30 @@ public class MainViewModel extends ViewModel {
     }
 
     public void sendImageToRoboflow(Bitmap bitmap) {
-        if (!isAnalyzing.get()) {
+        // Kondisi guard untuk mencegah pemrosesan frame yang tidak perlu
+        if (!isAnalyzing.get() || !isProcessingFrame.compareAndSet(false, true)) {
             if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
-            return;
-        }
-
-        if (!isProcessingFrame.compareAndSet(false, true)) {
+            if (!isAnalyzing.get()) return;
             Log.v(TAG, "Skipping frame, previous frame still processing.");
-            if (bitmap != null && !bitmap.isRecycled()) {
-                bitmap.recycle();
-            }
             return;
         }
 
         roboflowExecutor.submit(() -> {
-            if (!isAnalyzing.get()) {
-                Log.d(TAG, "Aborting frame processing because analysis has been stopped.");
-                if (bitmap != null && !bitmap.isRecycled()) {
-                    bitmap.recycle();
-                }
-                isProcessingFrame.set(false);
-                return;
-            }
+            // Helper untuk mendapatkan prediksi terakhir dari state saat ini
+            UiState currentState = _uiState.getValue();
+            List<Prediction> lastPredictions = (currentState != null) ? currentState.lastSuccessfulPredictions : null;
 
-            boolean bitmapPassedToSaver = false;
             try {
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                bitmap.compress(Bitmap.CompressFormat.JPEG, BITMAP_COMPRESSION_QUALITY, baos);
-                byte[] byteArray = baos.toByteArray();
+                // Gunakan kembali buffer yang ada
+                reusableBaos.reset(); // Kosongkan buffer sebelum digunakan lagi
+                bitmap.compress(Bitmap.CompressFormat.JPEG, BITMAP_COMPRESSION_QUALITY, reusableBaos);
+                byte[] byteArray = reusableBaos.toByteArray();
                 String base64Image = Base64.encodeToString(byteArray, Base64.NO_WRAP);
 
-                String url = ROBOFLOW_BASE_URL + "?api_key=" + ROBOFLOW_API_KEY;
+                String url = ROBOFLOW_BASE_URL +
+                        "?api_key=" + ROBOFLOW_API_KEY +
+                        "&confidence=" + ROBOFLOW_CONFIDENCE_THRESHOLD;
+
                 RequestBody requestBody = RequestBody.create(base64Image, MediaType.parse("application/x-www-form-urlencoded"));
                 Request request = new Request.Builder().url(url).post(requestBody).build();
 
@@ -134,38 +128,24 @@ public class MainViewModel extends ViewModel {
                     String responseBody = response.body().string();
                     RoboflowResponse roboflowResponse = gson.fromJson(responseBody, RoboflowResponse.class);
 
-                    // --- PERBAIKAN UTAMA: Tambahkan pengecekan terakhir di sini ---
-                    // Sebelum menampilkan hasil, pastikan kita masih dalam mode analisis.
                     if (isAnalyzing.get()) {
                         if (roboflowResponse != null && roboflowResponse.predictions != null && !roboflowResponse.predictions.isEmpty()) {
-                            Prediction first = roboflowResponse.predictions.get(0);
-
-                            _uiState.postValue(UiState.success(first));
-                            Log.d(TAG, "Posture updated: " + first.className + " with confidence " + first.confidence);
-
-                            final Bitmap bitmapToSave = bitmap;
-                            imageSaverExecutor.submit(() -> {
-                                imageSaver.saveBitmap(bitmapToSave, System.currentTimeMillis(), first.className, first.confidence);
-                            });
-                            bitmapPassedToSaver = true;
-
+                            _uiState.postValue(UiState.success(roboflowResponse.predictions));
                         } else {
-                            _uiState.postValue(UiState.noDetection());
+                            // Tetap tampilkan box lama jika tidak ada deteksi baru
+                            _uiState.postValue(UiState.noDetection(lastPredictions));
                         }
-                    } else {
-                        Log.d(TAG, "Analysis stopped. Ignoring result from in-flight request.");
                     }
                 }
 
-            } catch (IOException e) {
-                Log.e(TAG, "Network or Server Error: ", e);
-                // Hanya update UI jika masih menganalisis
-                if(isAnalyzing.get()) _uiState.postValue(UiState.error("Network Error"));
             } catch (Exception e) {
-                Log.e(TAG, "An unexpected error occurred: ", e);
-                if(isAnalyzing.get()) _uiState.postValue(UiState.error(e.getMessage()));
+                Log.e(TAG, "An error occurred during Roboflow request: ", e);
+                if (isAnalyzing.get()) {
+                    // Tetap tampilkan box lama jika terjadi error
+                    _uiState.postValue(UiState.error("Processing Error", lastPredictions));
+                }
             } finally {
-                if (!bitmapPassedToSaver && bitmap != null && !bitmap.isRecycled()) {
+                if (bitmap != null && !bitmap.isRecycled()) {
                     bitmap.recycle();
                 }
                 isProcessingFrame.set(false);
@@ -177,9 +157,15 @@ public class MainViewModel extends ViewModel {
     protected void onCleared() {
         super.onCleared();
         roboflowExecutor.shutdown();
-        imageSaverExecutor.shutdown();
+        try {
+            // Tutup stream saat ViewModel dihancurkan
+            reusableBaos.close();
+        } catch (IOException e) {
+            Log.e(TAG, "Error closing reusableBaos", e);
+        }
     }
 
+    // Data class untuk deserialisasi response JSON dari Roboflow
     public static class RoboflowResponse {
         public List<Prediction> predictions;
     }

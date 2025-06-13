@@ -5,6 +5,9 @@ import androidx.annotation.Nullable;
 
 import com.example.myapplication.MainViewModel;
 
+import java.util.List;
+import java.util.Locale;
+
 public class UiState {
 
     @NonNull
@@ -12,43 +15,45 @@ public class UiState {
     @Nullable
     public final String message;
     @Nullable
-    public final MainViewModel.Prediction prediction; // Field untuk membawa data prediksi
+    public final List<MainViewModel.Prediction> predictions;
 
-    // Ubah constructor untuk menerima objek Prediction
-    private UiState(@NonNull Status status, @Nullable String message, @Nullable MainViewModel.Prediction prediction) {
+    // --- PENAMBAHAN: Simpan prediksi terakhir yang berhasil ---
+    @Nullable
+    public final List<MainViewModel.Prediction> lastSuccessfulPredictions;
+
+    private UiState(@NonNull Status status, @Nullable String message, @Nullable List<MainViewModel.Prediction> predictions, @Nullable List<MainViewModel.Prediction> lastSuccessfulPredictions) {
         this.status = status;
         this.message = message;
-        this.prediction = prediction;
+        this.predictions = predictions;
+        this.lastSuccessfulPredictions = lastSuccessfulPredictions;
     }
 
-    // Perbarui factory methods
+    // --- Perbarui semua factory method ---
     public static UiState ready() {
-        return new UiState(Status.READY, "Ready to analyze", null);
+        return new UiState(Status.READY, "Ready to analyze", null, null);
     }
 
-    public static UiState analyzing() {
-        return new UiState(Status.ANALYZING, "Analyzing...", null);
+    // Method analyzing sekarang bisa membawa data lama
+    public static UiState analyzing(@Nullable List<MainViewModel.Prediction> lastPredictions) {
+        return new UiState(Status.ANALYZING, "Analyzing...", null, lastPredictions);
     }
 
-    // Method success sekarang menerima seluruh objek Prediction
-    public static UiState success(MainViewModel.Prediction prediction) {
-        String resultText = "✓ " + prediction.className + " (" + Math.round(prediction.confidence * 100) + "%)";
-        return new UiState(Status.SUCCESS, resultText, prediction);
+    public static UiState success(List<MainViewModel.Prediction> predictions) {
+        String resultText = String.format(Locale.US, "✓ %d object(s) detected", predictions.size());
+        return new UiState(Status.SUCCESS, resultText, predictions, predictions); // Simpan juga sebagai last successful
     }
 
     public static UiState stopped() {
-        return new UiState(Status.STOPPED, "Analysis stopped", null);
+        return new UiState(Status.STOPPED, "Analysis stopped", null, null);
     }
 
-    public static UiState error(String errorMessage) {
-        return new UiState(Status.ERROR, "Error: " + errorMessage, null);
+    public static UiState error(String errorMessage, @Nullable List<MainViewModel.Prediction> lastPredictions) {
+        return new UiState(Status.ERROR, "Error: " + errorMessage, null, lastPredictions);
     }
 
-    // Method ini digunakan jika Roboflow tidak menemukan objek apa pun
-    public static UiState noDetection() {
-        return new UiState(Status.ANALYZING, "Analyzing... (No object detected)", null);
+    public static UiState noDetection(@Nullable List<MainViewModel.Prediction> lastPredictions) {
+        return new UiState(Status.ANALYZING, "Analyzing... (No object detected)", null, lastPredictions);
     }
-
 
     public enum Status {
         READY,
