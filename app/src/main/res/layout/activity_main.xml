@@ -71,6 +71,22 @@
         app:srcCompat="@drawable/ic_camera_flip"
         app:tint="@android:color/white" />
 
+    <!-- Tombol Pilih dari Galeri -->
+    <ImageButton
+        android:id="@+id/selectImageButton"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginBottom="24dp"
+        android:background="@drawable/bg_circle_transparent_dark"
+        android:contentDescription="Pilih dari Galeri"
+        android:padding="16dp"
+        android:scaleType="fitCenter"
+        app:srcCompat="@drawable/ic_gallery"
+        app:tint="@android:color/white"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
     <LinearLayout
         android:id="@+id/bottomActionContainer"
         android:layout_width="0dp"
@@ -108,6 +124,19 @@
                 android:paddingBottom="12dp"
                 tools:text="✓ Detected: Good Posture" />
         </androidx.cardview.widget.CardView>
+
+        <!-- SeekBar untuk kontrol zoom, tetap dipertahankan jika Anda ingin fitur zoom melalui slider -->
+        <SeekBar
+            android:id="@+id/zoomSlider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="8dp"
+            android:max="100"
+            android:progress="0"
+            android:thumbTint="@color/colorPrimary"
+            android:progressTint="@color/colorPrimary" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/toggleAnalysisButton"

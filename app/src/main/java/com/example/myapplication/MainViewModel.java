@@ -48,6 +48,7 @@ public class MainViewModel extends ViewModel {
 
     private final AtomicBoolean isAnalyzing = new AtomicBoolean(false);
     private final AtomicBoolean isProcessingFrame = new AtomicBoolean(false);
+    private boolean isCameraLive = true;
 
     // Membuat buffer untuk digunakan kembali demi mengurangi memory churn (GC pauses)
     private final ByteArrayOutputStream reusableBaos = new ByteArrayOutputStream();
@@ -73,7 +74,6 @@ public class MainViewModel extends ViewModel {
 
     public void startAnalysis() {
         if (isAnalyzing.compareAndSet(false, true)) {
-            // Ambil data terakhir untuk menjaga kontinuitas UI saat analisis dimulai
             List<Prediction> lastSuccess = _uiState.getValue() != null ? _uiState.getValue().lastSuccessfulPredictions : null;
             _uiState.postValue(UiState.analyzing(lastSuccess));
             Log.d(TAG, "Analysis started by user.");
@@ -92,23 +92,32 @@ public class MainViewModel extends ViewModel {
         return isAnalyzing.get();
     }
 
+    public boolean isCameraLive() {
+        return isCameraLive;
+    }
+
+    public void setCameraLive(boolean cameraLive) {
+        isCameraLive = cameraLive;
+    }
+
     public void sendImageToRoboflow(Bitmap bitmap) {
-        // Kondisi guard untuk mencegah pemrosesan frame yang tidak perlu
-        if (!isAnalyzing.get() || !isProcessingFrame.compareAndSet(false, true)) {
+        if (!isCurrentlyAnalyzing() && isCameraLive()) {
             if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
-            if (!isAnalyzing.get()) return;
+            return;
+        }
+
+        if (!isProcessingFrame.compareAndSet(false, true)) {
+            if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
             Log.v(TAG, "Skipping frame, previous frame still processing.");
             return;
         }
 
         roboflowExecutor.submit(() -> {
-            // Helper untuk mendapatkan prediksi terakhir dari state saat ini
             UiState currentState = _uiState.getValue();
             List<Prediction> lastPredictions = (currentState != null) ? currentState.lastSuccessfulPredictions : null;
 
             try {
-                // Gunakan kembali buffer yang ada
-                reusableBaos.reset(); // Kosongkan buffer sebelum digunakan lagi
+                reusableBaos.reset();
                 bitmap.compress(Bitmap.CompressFormat.JPEG, BITMAP_COMPRESSION_QUALITY, reusableBaos);
                 byte[] byteArray = reusableBaos.toByteArray();
                 String base64Image = Base64.encodeToString(byteArray, Base64.NO_WRAP);
@@ -128,23 +137,24 @@ public class MainViewModel extends ViewModel {
                     String responseBody = response.body().string();
                     RoboflowResponse roboflowResponse = gson.fromJson(responseBody, RoboflowResponse.class);
 
-                    if (isAnalyzing.get()) {
+                    if (isAnalyzing.get() || !isCameraLive()) {
                         if (roboflowResponse != null && roboflowResponse.predictions != null && !roboflowResponse.predictions.isEmpty()) {
                             _uiState.postValue(UiState.success(roboflowResponse.predictions));
                         } else {
-                            // Tetap tampilkan box lama jika tidak ada deteksi baru
                             _uiState.postValue(UiState.noDetection(lastPredictions));
                         }
+                    } else {
+                        Log.d(TAG, "Skipping UI update for detection result as not in analyzing mode or not from gallery.");
                     }
                 }
 
             } catch (Exception e) {
                 Log.e(TAG, "An error occurred during Roboflow request: ", e);
-                if (isAnalyzing.get()) {
-                    // Tetap tampilkan box lama jika terjadi error
+                if (isAnalyzing.get() || !isCameraLive()) {
                     _uiState.postValue(UiState.error("Processing Error", lastPredictions));
                 }
             } finally {
+                // Pastikan bitmap yang dikirim ke Roboflow di-recycle setelah digunakan
                 if (bitmap != null && !bitmap.isRecycled()) {
                     bitmap.recycle();
                 }
@@ -158,14 +168,12 @@ public class MainViewModel extends ViewModel {
         super.onCleared();
         roboflowExecutor.shutdown();
         try {
-            // Tutup stream saat ViewModel dihancurkan
             reusableBaos.close();
         } catch (IOException e) {
             Log.e(TAG, "Error closing reusableBaos", e);
         }
     }
 
-    // Data class untuk deserialisasi response JSON dari Roboflow
     public static class RoboflowResponse {
         public List<Prediction> predictions;
     }

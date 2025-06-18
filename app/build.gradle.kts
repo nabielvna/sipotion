@@ -42,6 +42,7 @@ kapt {
 }
 
 dependencies {
+    implementation(libs.exifinterface)
     val cameraxVersion = "1.3.4"
 
     // -- Android UI & Core --

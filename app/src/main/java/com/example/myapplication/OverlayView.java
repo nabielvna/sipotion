@@ -1,6 +1,7 @@
 package com.example.myapplication;
 
 import android.content.Context;
+import android.graphics.Bitmap; // Import Bitmap
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -26,6 +27,9 @@ public class OverlayView extends View {
     private final Paint textBackgroundPaint;
     private final float cornerRadius;
     private final Rect textBounds = new Rect();
+
+    @Nullable
+    private Bitmap imageToDraw; // Variabel untuk menyimpan gambar dari galeri
 
     // --- PENAMBAHAN: Kelas internal untuk membantu proses layout ---
     private static class Label {
@@ -63,18 +67,60 @@ public class OverlayView extends View {
         synchronized (boundingBoxes) {
             boundingBoxes.clear();
         }
-        postInvalidate();
+        // Jangan panggil postInvalidate() di sini, karena onDraw akan dipanggil oleh setImageToDraw atau observer
     }
 
     public void add(Box box) {
         synchronized (boundingBoxes) {
             boundingBoxes.add(box);
         }
+        // Jangan panggil postInvalidate() di sini, karena onDraw akan dipanggil oleh setImageToDraw atau observer
     }
+
+    // --- Metode baru untuk mengatur bitmap yang akan digambar ---
+    public void setImageToDraw(@Nullable Bitmap bitmap) {
+        if (this.imageToDraw != null && this.imageToDraw != bitmap && !this.imageToDraw.isRecycled()) {
+            // Recycle bitmap sebelumnya jika ada dan berbeda
+            this.imageToDraw.recycle();
+        }
+        this.imageToDraw = bitmap;
+        postInvalidate(); // Memicu onDraw untuk menggambar ulang
+    }
+
+    // --- Getter untuk memeriksa apakah ada gambar yang sedang digambar (opsional, untuk debug) ---
+    @Nullable
+    public Bitmap getImageToDraw() {
+        return imageToDraw;
+    }
+
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+
+        // --- TAHAP 0: Gambar gambar dari galeri jika ada ---
+        if (imageToDraw != null && !imageToDraw.isRecycled()) {
+            // Skala dan posisikan gambar agar pas di OverlayView (dengan letterboxing/pillarboxing)
+            float viewWidth = getWidth();
+            float viewHeight = getHeight();
+            float bitmapWidth = imageToDraw.getWidth();
+            float bitmapHeight = imageToDraw.getHeight();
+
+            if (viewWidth > 0 && viewHeight > 0 && bitmapWidth > 0 && bitmapHeight > 0) {
+                float scaleX = viewWidth / bitmapWidth;
+                float scaleY = viewHeight / bitmapHeight;
+                float scale = Math.min(scaleX, scaleY); // Gunakan skala terkecil untuk mempertahankan aspek rasio
+
+                float scaledWidth = bitmapWidth * scale;
+                float scaledHeight = bitmapHeight * scale;
+
+                float left = (viewWidth - scaledWidth) / 2;
+                float top = (viewHeight - scaledHeight) / 2;
+
+                canvas.drawBitmap(imageToDraw, null, new RectF(left, top, left + scaledWidth, top + scaledHeight), null);
+            }
+        }
+
 
         // --- TAHAP 1: KUMPULKAN SEMUA INFORMASI LABEL DAN GAMBAR BOUNDING BOX ---
         List<Label> labelsToDraw = new ArrayList<>();
