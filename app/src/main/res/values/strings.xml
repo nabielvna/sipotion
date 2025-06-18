@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">My Application</string>
+    <string name="app_name">Sipotion</string>
     <string name="start_analysis">Start Analysis</string>
     <string name="stop_analysis">Stop Analysis</string>
     <string name="analyzing">Analyzing...</string>
