@@ -32,12 +32,12 @@ import okhttp3.Response;
 public class MainViewModel extends ViewModel {
     private static final String TAG = "SITTING_POSTURE_VM";
 
-    private static final String ROBOFLOW_BASE_URL = "https://detect.roboflow.com/sipotion-object-detection/2";
+    private static final String ROBOFLOW_BASE_URL = "https://detect.roboflow.com/sipotion-object-detection/6";
     private static final String ROBOFLOW_API_KEY = "zcZeM8rIczdRi00455rj";
-    private static final int ROBOFLOW_CONFIDENCE_THRESHOLD = 70;
+    private static final int ROBOFLOW_CONFIDENCE_THRESHOLD = 60;
 
     // Menurunkan kualitas untuk mengurangi ukuran data & mempercepat proses
-    private static final int BITMAP_COMPRESSION_QUALITY = 65;
+    private static final int BITMAP_COMPRESSION_QUALITY = 80;
 
     private final OkHttpClient client;
     private final Gson gson;
