@@ -45,7 +45,7 @@ import dagger.hilt.android.AndroidEntryPoint;
 @AndroidEntryPoint
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "SITTING_POSTURE_ACT";
-    private static final long ANALYSIS_INTERVAL_MS = 500;
+    private static final long ANALYSIS_INTERVAL_MS = 800;
 
     private PreviewView previewView;
     private TextView resultTextView;
