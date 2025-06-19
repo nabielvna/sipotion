@@ -32,11 +32,10 @@ import okhttp3.Response;
 public class MainViewModel extends ViewModel {
     private static final String TAG = "SITTING_POSTURE_VM";
 
-    private static final String ROBOFLOW_BASE_URL = "https://detect.roboflow.com/sipotion-object-detection/6";
+    private static final String ROBOFLOW_BASE_URL = "https://detect.roboflow.com/sipotion-object-detection/8";
     private static final String ROBOFLOW_API_KEY = "zcZeM8rIczdRi00455rj";
     private static final int ROBOFLOW_CONFIDENCE_THRESHOLD = 60;
 
-    // Menurunkan kualitas untuk mengurangi ukuran data & mempercepat proses
     private static final int BITMAP_COMPRESSION_QUALITY = 80;
 
     private final OkHttpClient client;
@@ -50,7 +49,6 @@ public class MainViewModel extends ViewModel {
     private final AtomicBoolean isProcessingFrame = new AtomicBoolean(false);
     private boolean isCameraLive = true;
 
-    // Membuat buffer untuk digunakan kembali demi mengurangi memory churn (GC pauses)
     private final ByteArrayOutputStream reusableBaos = new ByteArrayOutputStream();
 
     @Inject

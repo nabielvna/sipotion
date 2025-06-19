@@ -60,6 +60,7 @@ public class UiState {
         ANALYZING,
         SUCCESS,
         STOPPED,
-        ERROR
+        ERROR,
+        NO_DETECTION
     }
 }
